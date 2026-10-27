@@ -63,7 +63,7 @@ try {
     } finally { $zip.Dispose() }
     [IO.Compression.ZipFile]::ExtractToDirectory($activeArchive, $stage)
     $source = Join-Path $stage $roots[0]
-    foreach ($required in @('Setup.ps1','HdrSdrMenu.ps1','HdrTray.ps1','Start-Tray.vbs','Toggle-HdrSdr.vbs','HdrSdrMenu.ico','hdr-context-menu.nss')) {
+    foreach ($required in @('Setup.ps1','HdrSdrMenu.ps1','HdrTray.ps1','TrayTheme.cs','Start-Tray.vbs','Toggle-HdrSdr.vbs','HdrSdrMenu.ico','hdr-context-menu.nss')) {
         if (-not (Test-Path -LiteralPath (Join-Path $source $required) -PathType Leaf)) {
             throw ('The package is incomplete: ' + $required)
         }
