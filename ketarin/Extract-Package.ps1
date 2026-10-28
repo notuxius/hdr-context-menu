@@ -22,6 +22,32 @@ function Assert-PackagePath([string]$Path) {
     }
 }
 
+function Remove-OldDownloads {
+    # Only prune known backup archives and empty duplicate package folders.
+    # Run after successful replacement so a failed update keeps its recovery files.
+    foreach ($item in Get-ChildItem -LiteralPath $folder -Force) {
+        $full = [IO.Path]::GetFullPath($item.FullName)
+        if ([IO.Path]::GetDirectoryName($full) -ne $folder -or
+            ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { continue }
+        if ($item.PSIsContainer -and $item.Name -match '^Package \([1-9][0-9]*\)$') {
+            if (@(Get-ChildItem -LiteralPath $full -Force).Count -eq 0) {
+                # Non-recursive removal also protects against new files arriving.
+                [IO.File]::SetAttributes($full, ($item.Attributes -band (-bnot [IO.FileAttributes]::ReadOnly)))
+                [IO.Directory]::Delete($full, $false)
+            }
+        } elseif (-not $item.PSIsContainer -and $item.Name -match '^before-sync-[0-9]{8}-[0-9]{6}\.zip$') {
+            $backup = $null
+            $ownedArchive = $false
+            try {
+                $backup = [IO.Compression.ZipFile]::OpenRead($full)
+                $backupRoots = @($backup.Entries | ForEach-Object { ($_.FullName -split '/')[0] } | Select-Object -Unique)
+                $ownedArchive = $backupRoots.Count -eq 1 -and $backupRoots[0] -match '^hdr-context-menu-[0-9a-f]{40}$'
+            } catch { } finally { if ($null -ne $backup) { $backup.Dispose() } }
+            if ($ownedArchive) { Remove-Item -LiteralPath $full -Force }
+        }
+    }
+}
+
 Assert-PackagePath $destination
 Assert-PackagePath $previous
 Assert-PackagePath $stage
@@ -86,6 +112,8 @@ try {
         }
         throw
     }
+    try { Remove-OldDownloads }
+    catch { Write-Warning ('Package updated, but old download cleanup will retry next update: ' + $_.Exception.Message) }
     Write-Output ('Downloaded package ' + $commit + '. Choose Install in Ketarin to apply it.')
 } finally {
     if (Test-Path -LiteralPath $stage) {
