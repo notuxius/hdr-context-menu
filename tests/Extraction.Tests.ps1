@@ -22,6 +22,11 @@ Make-TestArchive $false
 & $script
 if ([IO.File]::ReadAllText((Join-Path $root 'Package\package.commit')) -ne ('a' * 40)) { throw 'Commit marker missing' }
 Set-Content -LiteralPath (Join-Path $root 'Package\old-only.txt') -Value 'old package'
+$packageCreated = (Get-Item -LiteralPath (Join-Path $root 'Package')).CreationTimeUtc
+New-Item -ItemType Directory -Path (Join-Path $root 'Package\obsolete-dir') | Out-Null
+Set-Content -LiteralPath (Join-Path $root 'Package\obsolete-dir\old.txt') -Value 'obsolete'
+New-Item -ItemType Directory -Path (Join-Path $root 'Package.previous') | Out-Null
+$previousCreated = (Get-Item -LiteralPath (Join-Path $root 'Package.previous')).CreationTimeUtc
 $backupPath = Join-Path $root 'before-sync-20261028-120000.zip'
 Copy-Item -LiteralPath $app.PreviousLocation -Destination $backupPath
 New-Item -ItemType Directory -Path (Join-Path $root 'Package (1)') | Out-Null
@@ -29,6 +34,9 @@ New-Item -ItemType Directory -Path (Join-Path $root 'Package (2)') | Out-Null
 Set-Content -LiteralPath (Join-Path $root 'Package (2)\notes.txt') -Value 'Keep user files'
 Set-Content -LiteralPath (Join-Path $root 'before-sync-20261028-120001.zip') -Value 'Not an HDR archive'
 & $script
+if ((Get-Item -LiteralPath (Join-Path $root 'Package')).CreationTimeUtc -ne $packageCreated) { throw 'Current folder identity was replaced' }
+if ((Get-Item -LiteralPath (Join-Path $root 'Package.previous')).CreationTimeUtc -ne $previousCreated) { throw 'Previous folder identity was replaced' }
+if (Test-Path -LiteralPath (Join-Path $root 'Package\obsolete-dir')) { throw 'Obsolete directory survived replacement' }
 if (Test-Path -LiteralPath $backupPath) { throw 'Old HDR backup archive survived cleanup' }
 if (Test-Path -LiteralPath (Join-Path $root 'Package (1)')) { throw 'Empty duplicate folder survived cleanup' }
 if (-not (Test-Path -LiteralPath (Join-Path $root 'Package (2)\notes.txt'))) { throw 'Cleanup removed user files' }

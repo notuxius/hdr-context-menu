@@ -49,18 +49,50 @@ $archive = [IO.Path]::GetFullPath($app.PreviousLocation)
 $folder = [IO.Path]::GetDirectoryName($archive)
 $destination = Join-Path $folder 'Package'
 $previous = Join-Path $folder 'Package.previous'
-$stage = Join-Path $folder ('extract-' + [Guid]::NewGuid().ToString('N'))
+$tempFolder = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
+$stage = Join-Path $tempFolder ('hdr-extract-' + [Guid]::NewGuid().ToString('N'))
 
 function Assert-PackagePath([string]$Path) {
     $full = [IO.Path]::GetFullPath($Path)
-    if ([IO.Path]::GetDirectoryName($full) -ne $folder -or
-        [IO.Path]::GetFileName($full) -notmatch '^(Package(\.previous)?|extract-[0-9a-f]{32})$') {
-        throw 'Refusing to modify a path outside the package download folder.'
+    $packagePath = [IO.Path]::GetDirectoryName($full) -eq $folder -and [IO.Path]::GetFileName($full) -match '^Package(\.previous)?$'
+    $stagingPath = $full -eq $stage -and [IO.Path]::GetDirectoryName($full) -eq $tempFolder -and [IO.Path]::GetFileName($full) -match '^hdr-extract-[0-9a-f]{32}$'
+    if (-not ($packagePath -or $stagingPath)) {
+        throw 'Refusing to modify a path outside the package or staging folders.'
     }
     if (Test-Path -LiteralPath $full) {
         $items = @(Get-Item -LiteralPath $full) + @(Get-ChildItem -LiteralPath $full -Recurse -Force)
         if ($items | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }) {
             throw 'The package folder must not contain a symbolic link or junction.'
+        }
+    }
+}
+
+function Set-PackageContents([string]$Source, [string]$Target) {
+    if ($Target -ne $destination -and $Target -ne $previous) { throw 'Invalid package target.' }
+    Assert-PackagePath $Target
+    $sourceItems = @(Get-ChildItem -LiteralPath $Source -Recurse -Force)
+    if ($sourceItems | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }) {
+        throw 'Package source contains a symbolic link or junction.'
+    }
+    New-Item -ItemType Directory -Path $Target -Force | Out-Null
+    $prefix = [IO.Path]::GetFullPath($Source).TrimEnd('\') + '\'
+    foreach ($item in $sourceItems | Sort-Object { $_.FullName.Length }) {
+        $relative = $item.FullName.Substring($prefix.Length)
+        $copy = [IO.Path]::GetFullPath((Join-Path $Target $relative))
+        if (-not $copy.StartsWith($Target.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Invalid package content path.' }
+        if (Test-Path -LiteralPath $copy) {
+            $existing = Get-Item -LiteralPath $copy -Force
+            if ($existing.PSIsContainer -ne $item.PSIsContainer) { Remove-Item -LiteralPath $copy -Recurse -Force }
+        }
+        if ($item.PSIsContainer) { New-Item -ItemType Directory -Path $copy -Force | Out-Null }
+        else { Copy-Item -LiteralPath $item.FullName -Destination $copy -Force }
+    }
+    # Keep directory identities stable for cloud sync. Remove obsolete contents
+    # only after all replacement files have been copied successfully.
+    foreach ($item in Get-ChildItem -LiteralPath $Target -Recurse -Force | Sort-Object { $_.FullName.Length } -Descending) {
+        $relative = $item.FullName.Substring($Target.TrimEnd('\').Length + 1)
+        if (-not (Test-Path -LiteralPath (Join-Path $Source $relative))) {
+            Remove-Item -LiteralPath $item.FullName -Force
         }
     }
 }
@@ -139,20 +171,11 @@ try {
     }
     [IO.File]::WriteAllText((Join-Path $source 'package.commit'), $commit)
     if ($activeArchive -ne $archive) { Copy-Item -LiteralPath $activeArchive -Destination $archive -Force }
-    if (Test-Path -LiteralPath $previous) {
-        Assert-PackagePath $previous
-        Remove-Item -LiteralPath $previous -Recurse -Force
-    }
-    if (Test-Path -LiteralPath $destination) {
-        Assert-PackagePath $destination
-        Move-Item -LiteralPath $destination -Destination $previous
-    }
-    try { Move-Item -LiteralPath $source -Destination $destination }
+    $hadPackage = Test-Path -LiteralPath $destination
+    if ($hadPackage) { Set-PackageContents $destination $previous }
+    try { Set-PackageContents $source $destination }
     catch {
-        if ((Test-Path -LiteralPath $previous) -and -not (Test-Path -LiteralPath $destination)) {
-            Assert-PackagePath $previous
-            Move-Item -LiteralPath $previous -Destination $destination
-        }
+        if ($hadPackage) { Set-PackageContents $previous $destination }
         throw
     }
     try { Remove-OldDownloads }

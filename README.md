@@ -46,7 +46,7 @@ This package is intended for a single interactive user per PC. Install with that
 Import **[ketarin/HDR Context Menu.xml](ketarin/HDR%20Context%20Menu.xml)** into Ketarin.
 
 1. **Update** checks the latest `main` commit and downloads its exact archive into `..\_Tweaks\HDR Context Menu\_.zip`, relative to Ketarin.
-2. The post-download command validates and extracts it into `Package`, keeping only the last package in `Package.previous`. After a successful update, it removes old `before-sync-*.zip` HDR archives and empty numbered `Package (n)` folders. The current `_.zip` is retained; other files and nonempty numbered folders are left alone.
+2. The post-download command validates and extracts it into `Package`, keeping only the last package in `Package.previous`. After a successful update, it removes old `before-sync-*.zip` HDR archives and empty numbered `Package (n)` folders. The current `_.zip` is retained; other files and nonempty numbered folders are left alone. Extraction uses the local temporary folder, and updates copy contents into stable `Package` and `Package.previous` folders to avoid cloud-sync rename conflicts.
 3. **Install** applies the prepared package. Updating alone does not install it or change HDR.
 
 The entry uses the full commit SHA as its version indicator. Repeated checks do not download an unchanged commit. The XML contains the same extraction code as `ketarin/Extract-Package.ps1`.
